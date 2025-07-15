@@ -223,7 +223,7 @@ dtype = torch.bfloat16
 dtype_gen = torch.bfloat16 if dtype == torch.float8_e4m3fn else dtype
 device = 'cuda'
 verbose = True
-varlen = False
+varlen = os.getenv("VARLEN", "False").lower() in ('true', '1', 't')
 has_backward = False
 page_size = None
 softcap = 0.0
@@ -231,13 +231,16 @@ V_colmajor = False
 deterministic = False
 batch_size = 2
 # seqlen = 2048
-seqlen = 8192
+# seqlen = 8192
 # seqlen = 4096
 # seqlen = 2047
-dim = 2048
+seqlen = int(os.getenv("FA_SEQLEN", "8192"))
+# dim = 2048
+dim = int(os.getenv("FA_DIM", "2048"))
 # headdim = 128
 # headdim = 64
-headdim = 256
+# headdim = 256
+headdim = int(os.getenv("FA_HEADDIM", "256"))
 # for headdim in [64, 128, 256]:
 # bs_seqlen_vals = [(32, 512), (16, 1024), (8, 2048), (4, 4096), (2, 8192), (1, 16384)]
 # bs_seqlen_vals = [(16, 1024), (8, 2048), (4, 4096), (2, 8192), (1, 16384)]
@@ -392,11 +395,11 @@ for headdim in [128]:
                 if has_backward:
                     print(f'CuDNN bwd: {m2b.mean * 1e3:.3f}ms, {(2.5 * nFLOPS / m2b.mean * 1e-12):.1f} TFLOPS')
             if flash_attn_func_v3 is not None:
-                print(f'FAv3 fwd: {m1.mean * 1e3:.3f}ms, {(nFLOPS / m1.mean * 1e-12):.1f} TFLOPS')
+                print(f'FAv3 fwd{" Varlen" if varlen else ""}: {m1.mean * 1e3:.3f}ms, {(nFLOPS / m1.mean * 1e-12):.1f} TFLOPS')
                 if dtype != torch.float8_e4m3fn and headdim == headdim_v and has_backward:
-                    print(f'FAv3 bwd: {m1b.mean * 1e3:.3f}ms, {(2.5 * nFLOPS / m1b.mean * 1e-12):.1f} TFLOPS')
+                    print(f'FAv3 bwd{" Varlen" if varlen else ""}: {m1b.mean * 1e3:.3f}ms, {(2.5 * nFLOPS / m1b.mean * 1e-12):.1f} TFLOPS')
 
             if flash_attn_func_python is not None:
-                print(f'FA Python fwd: {m1_py.mean * 1e3:.3f}ms, {(nFLOPS / m1_py.mean * 1e-12):.1f} TFLOPS')
+                print(f'FA Python fwd{" Varlen" if varlen else ""}: {m1_py.mean * 1e3:.3f}ms, {(nFLOPS / m1_py.mean * 1e-12):.1f} TFLOPS')
                 if dtype != torch.float8_e4m3fn and headdim == headdim_v and has_backward:
-                    print(f'FAv2 Python bwd: {m1b_py.mean * 1e3:.3f}ms, {(2.5 * nFLOPS / m1b_py.mean * 1e-12):.1f} TFLOPS')
+                    print(f'FAv2 Python bwd{" Varlen" if varlen else ""}: {m1b_py.mean * 1e3:.3f}ms, {(2.5 * nFLOPS / m1b_py.mean * 1e-12):.1f} TFLOPS')
