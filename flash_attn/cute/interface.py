@@ -38,6 +38,8 @@ from flash_attn.cute.flash_bwd import FlashAttentionBackwardSm80
 from flash_attn.cute.flash_bwd_postprocess import FlashAttentionBackwardPostprocess
 from flash_attn.cute.flash_fwd_combine import FlashAttentionForwardCombine
 
+from flash_attn.flash_attn_interface import _flash_attn_varlen_backward
+
 
 def maybe_contiguous(x):
     return x.contiguous() if x is not None and x.stride(-1) != 1 else x
@@ -515,10 +517,57 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dout, *args):
         q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k, seqused_q, seqused_k = ctx.saved_tensors
-        raise NotImplementedError(
-            "Backward pass for FlashAttention with variable length sequences is not implemented yet."
-        )
+        #raise NotImplementedError(
+        #    "Backward pass for FlashAttention with variable length sequences is not implemented yet."
+        #)
+        dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
+        head_size_og = dout.size(2)
+        dout_padded = dout
+        if head_size_og % 8 != 0:
+            dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
 
+        # default softmax_scale if not provided
+        softmax_scale = ctx.softmax_scale
+        if softmax_scale is None:
+            softmax_scale = q.shape[-1] ** (-0.5)
+        # compute max_seqlen_{q|k}
+        seqlens_q = cu_seqlens_q[1:] - cu_seqlens_q[:-1]
+        max_seqlen_q = seqlens_q.max()
+        seqlens_k = cu_seqlens_k[1:] - cu_seqlens_k[:-1]
+        max_seqlen_k = seqlens_k.max()
+        # window size defaults
+        window_size_left  = ctx.window_size[0] if ctx.window_size[0] is not None else -1
+        window_size_right = ctx.window_size[1] if ctx.window_size[1] is not None else -1
+        # call into FA2 kernel
+
+        _flash_attn_varlen_backward(
+            dout_padded,
+            q,
+            k,
+            v,
+            out,
+            lse,
+            dq,
+            dk,
+            dv,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            0, # dropout_p
+            softmax_scale,
+            ctx.causal,
+            window_size_left,
+            window_size_right,
+            ctx.softcap,
+            None, # alibi_slopes
+            False, # deterministic
+            # rng_state=rng_state
+        )
+        dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
+        dk = dk[..., : dout.shape[-1]]
+        dv = dv[..., : dout.shape[-1]]
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_func(
     q: torch.Tensor,
